@@ -11,6 +11,7 @@ Status convention (không dùng True/False mơ hồ):
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Literal
 
 from google.genai import types
@@ -55,8 +56,17 @@ def detect_injection(user_input: str) -> InputStatus:
         # TODO: Add at least 5 regex patterns
         # Example:
         # r"ignore (all )?(previous|above) instructions",
+        r"ignore (all )?(previous|above) instructions",
+        r"you are now",
+        r"system prompt",
+        r"reveal your (instructions|prompt)",
+        r"pretend you are",
+        r"act as (a |an )?unrestricted",
     ]
 
+    user_input = unicodedata.normalize("NFKC", user_input)
+    user_input = "".join(c for c in user_input if unicodedata.category(c) != "Cf")
+    user_input = " ".join(user_input.split())
     for pattern in INJECTION_PATTERNS:
         if re.search(pattern, user_input, re.IGNORECASE):
             return "BLOCK"
@@ -91,7 +101,13 @@ def topic_filter(user_input: str) -> InputStatus:
     # 2. If input doesn't contain any allowed topic -> return "BLOCK"
     # 3. Otherwise -> return "ALLOW"
 
-    pass  # Replace with your implementation
+    if any(blocked_topic in input_lower for blocked_topic in BLOCKED_TOPICS):
+        return "BLOCK"
+
+    if not any(allowed_topic in input_lower for allowed_topic in ALLOWED_TOPICS):
+        return "BLOCK"
+
+    return "ALLOW"
 
 
 # ============================================================
@@ -151,7 +167,21 @@ class InputGuardrailPlugin(base_plugin.BasePlugin):
         #    - If "BLOCK": increment blocked_count, return self._block_response("...")
         # 3. If both return "ALLOW": return None (let message through)
 
-        pass  # Replace with your implementation
+        detection_result = detect_injection(text)
+        if detection_result == "BLOCK":
+            self.blocked_count += 1
+            return self._block_response(
+                "Your message was blocked due to potential prompt injection."
+            )
+
+        filter_result = topic_filter(text)
+        if filter_result == "BLOCK":
+            self.blocked_count += 1
+            return self._block_response(
+                "Your message was blocked because it is off-topic or contains restricted content."
+            )
+
+        return None
 
 
 # ============================================================
